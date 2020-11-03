@@ -1,6 +1,7 @@
 ## TEST Model running time Tensorflow2 (Subclass VS Sequential API)
 DEVICE CPU : Intel(R) Xeon(R) CPU E5-2640 v4
 DEVICE GPU : Quadro M6000
+Test Algorithm : [DCGAN](https://www.tensorflow.org/tutorials/generative/dcgan?hl=ko)
 
 ### Performance
 - CPU
