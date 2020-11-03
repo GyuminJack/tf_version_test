@@ -2,6 +2,8 @@ import tensorflow as tf
 from tensorflow.keras import layers
 import time
 import os
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 BUFFER_SIZE = 60000
@@ -39,23 +41,26 @@ def make_generator_model():
     return model
 
 
-class generator(tf.keras.layers.Layer):
+class make_generator(tf.keras.Model):
     def __init__(self):
-        super(generator, self).__init__()
+        super(make_generator, self).__init__()
         self.Dense_1 = layers.Dense(7*7*256, use_bias=False, input_shape=(100,))
         self.LRelu = layers.LeakyReLU()
         self.reshape_1 = layers.Reshape((7,7,256))
         self.conv_1 = layers.Conv2DTranspose(128, (5, 5), strides=(1, 1), padding='same', use_bias=False)
         self.conv_2 = layers.Conv2DTranspose(64, (5, 5), strides=(2, 2), padding='same', use_bias=False)
         self.conv_3 = layers.Conv2DTranspose(1, (5, 5), strides=(2, 2), padding='same', use_bias=False, activation='tanh')
+        self.bn1 = layers.BatchNormalization()
+        self.bn2 = layers.BatchNormalization()
+        self.bn3 = layers.BatchNormalization()
     def call(self, inputs):
         x = self.Dense_1(inputs)
-        x = layers.BatchNormalization()(x)
+        x = self.bn1(x)
         x = self.LRelu(x)
         x = self.reshape_1(x)
-        for layer in [self.conv_1, self.conv_2]:
-            x = layer(x)
-            x = layers.BatchNormalization()(x)
+        for layer in [[self.conv_1, self.bn2], [self.conv_2, self.bn3]]:
+            x = layer[0](x)
+            x = layer[1](x)
             x = self.LRelu(x)
         x = self.conv_3(x)
         return x
@@ -67,38 +72,38 @@ def make_discriminator_model():
                                      input_shape=[28, 28, 1]))
     model.add(layers.LeakyReLU())
     model.add(layers.Dropout(0.3))
-
     model.add(layers.Conv2D(128, (5, 5), strides=(2, 2), padding='same'))
     model.add(layers.LeakyReLU())
     model.add(layers.Dropout(0.3))
-
     model.add(layers.Flatten())
     model.add(layers.Dense(1))
 
     return model
 
-class discriminator(tf.keras.layers.Layer):
+class make_discriminator(tf.keras.Model):
     def __init__(self):
-        super(discriminator, self).__init__()
+        super(make_discriminator, self).__init__()
         self.LRelu = layers.LeakyReLU()
         self.conv_1 = layers.Conv2D(64, (5, 5), strides=(2, 2), padding='same', input_shape=[28,28,1])
         self.conv_2 = layers.Conv2D(128, (5, 5), strides=(2, 2), padding='same', use_bias=False, activation='tanh')
+        self.dr = layers.Dropout(0.3)
+        self.fl = layers.Flatten()
+        self.dn = layers.Dense(1)
     def call(self, inputs):
         x = self.conv_1(inputs)
         x = self.LRelu(x)
-        x = layers.Dropout(0.3)(x)
-        x = layers.Flatten()(x)
-        x = layers.Dense(1)(x)
+        x = self.dr(x)
+        x = self.fl(x)
+        x = self.dn(x)
         return x
 
-option = "function"
+option = "class"
 if option == "function":
     generator = make_generator_model()
     discriminator = make_discriminator_model()
 else:
-    generator = generator()
-    discriminator = discriminator()
-
+    generator = make_generator()
+    discriminator = make_discriminator()
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
 def discriminator_loss(real_output, fake_output):
@@ -113,7 +118,7 @@ def generator_loss(fake_output):
 generator_optimizer = tf.keras.optimizers.Adam(1e-4)
 discriminator_optimizer = tf.keras.optimizers.Adam(1e-4)
 
-EPOCHS = 50
+EPOCHS = 500
 noise_dim = 100
 num_examples_to_generate = 16
 
@@ -136,13 +141,13 @@ def train_step(images):
     noise = tf.random.normal([BATCH_SIZE, noise_dim])
 
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
-      generated_images = generator(noise, training=True)
+        generated_images = generator(noise, training=True)
 
-      real_output = discriminator(images, training=True)
-      fake_output = discriminator(generated_images, training=True)
+        real_output = discriminator(images, training=True)
+        fake_output = discriminator(generated_images, training=True)
 
-      gen_loss = generator_loss(fake_output)
-      disc_loss = discriminator_loss(real_output, fake_output)
+        gen_loss = generator_loss(fake_output)
+        disc_loss = discriminator_loss(real_output, fake_output)
 
     gradients_of_generator = gen_tape.gradient(gen_loss, generator.trainable_variables)
     gradients_of_discriminator = disc_tape.gradient(disc_loss, discriminator.trainable_variables)
@@ -153,41 +158,35 @@ def train_step(images):
 def train(dataset, epochs):
     for epoch in range(epochs):
         start = time.time()
+        
+        for image_batch in dataset:
+            train_step(image_batch)
 
-    for image_batch in dataset:
-        train_step(image_batch)
+        # 15 에포크가 지날 때마다 모델을 저장합니다.
+        if (epoch + 1) % 50 == 0:
+            checkpoint.save(file_prefix = checkpoint_prefix)
+        
+        # print (' 에포크 {} 에서 걸린 시간은 {} 초 입니다'.format(epoch +1, time.time()-start))
+        print ('Time for epoch {} is {} sec'.format(epoch + 1, time.time()-start))
 
-    # GIF를 위한 이미지를 바로 생성합니다.
-    generate_and_save_images(generator,
-                             epoch + 1,
-                             seed)
-
-    # 15 에포크가 지날 때마다 모델을 저장합니다.
-    if (epoch + 1) % 15 == 0:
-        checkpoint.save(file_prefix = checkpoint_prefix)
-    
-    # print (' 에포크 {} 에서 걸린 시간은 {} 초 입니다'.format(epoch +1, time.time()-start))
-    print ('Time for epoch {} is {} sec'.format(epoch + 1, time.time()-start))
-
-  # 마지막 에포크가 끝난 후 생성합니다.
-    generate_and_save_images(generator,
-                            epochs,
-                            seed)
+    # 마지막 에포크가 끝난 후 생성합니다.
+        if (epoch + 1) % 10 == 0:
+            generate_and_save_images(generator, epoch, seed)
 
 def generate_and_save_images(model, epoch, test_input):
   # `training`이 False로 맞춰진 것을 주목하세요.
   # 이렇게 하면 (배치정규화를 포함하여) 모든 층들이 추론 모드로 실행됩니다. 
-  predictions = model(test_input, training=False)
+    predictions = model(test_input, training=False)
 
-  fig = plt.figure(figsize=(4,4))
+    fig = plt.figure(figsize=(4,4))
 
-  for i in range(predictions.shape[0]):
-      plt.subplot(4, 4, i+1)
-      plt.imshow(predictions[i, :, :, 0] * 127.5 + 127.5, cmap='gray')
-      plt.axis('off')
+    for i in range(predictions.shape[0]):
+        plt.subplot(4, 4, i+1)
+        plt.imshow(predictions[i, :, :, 0] * 127.5 + 127.5, cmap='gray')
+        plt.axis('off')
 
-  plt.savefig('image_at_epoch_{:04d}.png'.format(epoch))
-  plt.show()
+    plt.savefig('./figures/image_at_epoch_{:04d}.png'.format(epoch))
 
 train_dataset = get_dataset()
 train(train_dataset, EPOCHS)
+
